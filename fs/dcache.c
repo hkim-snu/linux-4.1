@@ -2150,6 +2150,10 @@ struct dentry *__d_lookup_rcu(const struct dentry *parent,
 {
 	u64 hashlen = name->hash_len;
 	const unsigned char *str = name->name;
+	/* 
+	 * hj
+	 * (parent, filename) 으로 hashing 해서 hash table 에서 해당 bucket 가져오는 부분.
+	 */
 	struct hlist_bl_head *b = d_hash(parent, hashlen_hash(hashlen));
 	struct hlist_bl_node *node;
 	struct dentry *dentry;
@@ -2173,6 +2177,12 @@ struct dentry *__d_lookup_rcu(const struct dentry *parent,
 	 * renames using rename_lock seqlock.
 	 *
 	 * See Documentation/filesystems/path-lookup.txt for more details.
+	 */
+
+	/*
+	 * hj
+	 * follow linked list & search for dentry
+	 * hlist_bl_for_each_entry_rcu() -> defined as for loop
 	 */
 	hlist_bl_for_each_entry_rcu(dentry, node, b, d_hash) {
 		unsigned seq;

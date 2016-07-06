@@ -1359,6 +1359,11 @@ static struct dentry *lookup_dcache(struct qstr *name, struct dentry *dir,
 	return dentry;
 }
 
+extern int insmod_nysong;
+
+void (*p_latency_ext4_lookup)(unsigned char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_ext4_lookup);
+
 /*
  * Call i_op->lookup on the dentry.  The dentry must be negative and
  * unhashed.
@@ -1369,6 +1374,11 @@ static struct dentry *lookup_real(struct inode *dir, struct dentry *dentry,
 				  unsigned int flags)
 {
 	struct dentry *old;
+	
+	// -------
+	struct timespec ts;
+	unsigned long long start_time, end_time;
+	// -----------
 
 	/* Don't create child dentry for a dead directory. */
 	if (unlikely(IS_DEADDIR(dir))) {
@@ -1376,7 +1386,24 @@ static struct dentry *lookup_real(struct inode *dir, struct dentry *dentry,
 		return ERR_PTR(-ENOENT);
 	}
 
+	// nysong --------------
+	getnstimeofday(&ts);
+	start_time = timespec_to_ns(&ts);
+	// ------------------
+	
 	old = dir->i_op->lookup(dir, dentry, flags);
+
+	// nysong ------------
+	getnstimeofday(&ts);
+	end_time = timespec_to_ns(&ts);
+
+	if(insmod_nysong == 1 && p_latency_ext4_lookup != NULL)
+	{
+		p_latency_ext4_lookup(dentry->d_iname, end_time - start_time);
+	}
+	// ------------------------
+	
+	
 	if (unlikely(old)) {
 		dput(dentry);
 		dentry = old;
@@ -1774,6 +1801,11 @@ static inline u64 hash_name(const char *name)
 
 #endif
 
+void (*p_latency_may_lookup)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_may_lookup);
+void (*p_latency_walk_component)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_walk_component);
+
 /*
  * Name resolution.
  * This is the basic name resolution function, turning a pathname into
@@ -1786,6 +1818,9 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 {
 	struct path next;
 	int err;
+
+	unsigned long long start_time, end_time;
+	struct timespec ts;
 
 	/*
 	 * hj
@@ -1815,7 +1850,22 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		 * 	inode_permission()	-> 즉, 모든 하위 디렉토리 하나씩 내려갈 때마다 permission 체크 하고 있는 것임.
 		 *	unlazy_walk()
 		 */
+		// nysong ---------------------------
+		getnstimeofday(&ts);
+		start_time = timespec_to_ns(&ts);
+		// --------------------------------------
+
 		err = may_lookup(nd);
+
+		// nysong ----------------------------
+		getnstimeofday(&ts);
+		end_time = timespec_to_ns(&ts);
+		if(insmod_nysong == 1 && p_latency_may_lookup != NULL) 
+		{
+			p_latency_may_lookup(name, end_time - start_time);
+		}
+		// ------------------------------------
+
  		if (err)
 			break;
 
@@ -1885,7 +1935,22 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		if (!*name)
 			return 0;
 
+		// nysong ----------------
+		getnstimeofday(&ts);
+		start_time = timespec_to_ns(&ts);
+		// ---------------------------------
+
 		err = walk_component(nd, &next, LOOKUP_FOLLOW);
+		
+		// nysong -------------------------
+		getnstimeofday(&ts);
+		end_time = timespec_to_ns(&ts);
+		if(insmod_nysong == 1 && p_latency_walk_component != NULL)
+		{
+			p_latency_walk_component(name, end_time - start_time);
+		}
+		//------------------------------------
+
 		if (err < 0)
 			return err;
 
@@ -1902,6 +1967,12 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 	terminate_walk(nd);
 	return err;
 }
+
+void (*p_latency_path_init_1)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_path_init_1);
+
+void (*p_latency_link_path_walk)(const char *, unsigned long long ) = NULL;
+EXPORT_SYMBOL(p_latency_link_path_walk);
 
 static int path_init(int dfd, const struct filename *name, unsigned int flags,
 		     struct nameidata *nd)
@@ -1929,8 +2000,10 @@ static int path_init(int dfd, const struct filename *name, unsigned int flags,
 	nd->depth = 0;
 	nd->base = NULL;
 
+	// nysong -----------------------------
 	getnstimeofday(&ts);
 	start_time = timespec_to_ns(&ts);
+	// -------------------------------------
 
 	if (flags & LOOKUP_ROOT) {
 		// "/" ROOT 가 아니면 여기로 안들어옴. 
@@ -1962,15 +2035,19 @@ static int path_init(int dfd, const struct filename *name, unsigned int flags,
 		}
 		goto done;
 	}
+
+	// nysong ------------
 	getnstimeofday(&ts);
 	end_time = timespec_to_ns(&ts);
-	//printk("[HJ] [%s] LOOKUP_ROOT time [%llu]\n", name->name, end_time - start_time);
+	if(insmod_nysong == 1 && p_latency_path_init_1 != NULL)
+	{
+		p_latency_path_init_1(name->name, end_time - start_time);
+	}
+	// ------------------------
+
 
 	nd->root.mnt = NULL;
 
-
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
 	/*
 	 * hj - lock acquire 
 	 * read 하는데 lock 을 왜 하는거지?? read lock 인건가? write/append 들어올 수 있으니까?
@@ -1978,9 +2055,6 @@ static int path_init(int dfd, const struct filename *name, unsigned int flags,
 	 * 어쨌거나 overhead 는 아닐 수도 있으니까 일단 넘어가보자. I/O 가 일어나는 부분 & 횟수를 찾는게 중요함!
 	 */
 	nd->m_seq = read_seqbegin(&mount_lock);
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	//printk("[HJ] [%s] read_seqbegin [%llu]\n", name->name, end_time - start_time);
 	if (*s == '/') {
 		if (flags & LOOKUP_RCU) {
 			rcu_read_lock();
@@ -2086,7 +2160,27 @@ static int path_init(int dfd, const struct filename *name, unsigned int flags,
 	return -ECHILD;
 done:
 	current->total_link_count = 0;
-	return link_path_walk(s, nd);
+	
+	// nysong ------------------
+	getnstimeofday(&ts);
+	start_time = timespec_to_ns(&ts);
+	// ------------------------------
+
+	int l_p_w = link_path_walk(s, nd);
+
+	// nysong -----------
+	getnstimeofday(&ts);
+	end_time = timespec_to_ns(&ts);
+	
+	if(insmod_nysong == 1 && p_latency_link_path_walk != NULL)
+	{
+		p_latency_link_path_walk(name->name, end_time - start_time);
+	}
+	// ------------
+
+	return l_p_w;
+
+	//return link_path_walk(s, nd);
 }
 
 static void path_cleanup(struct nameidata *nd)
@@ -3047,6 +3141,10 @@ out_dput:
 	return error;
 }
 
+
+void (*p_latency_vfs_open)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_vfs_open);
+
 /*
  * Handle the last step of open()
  */
@@ -3065,6 +3163,9 @@ static int do_last(struct nameidata *nd, struct path *path,
 	bool retried = false;
 	int error;
 
+	struct timespec ts;
+	unsigned long long start_time, end_time;
+
 	/*
 	 * hj
 	 * name->name 이 file 의 full path 를 가지고 있음.
@@ -3081,6 +3182,11 @@ static int do_last(struct nameidata *nd, struct path *path,
 	}
 
 	if (!(open_flag & O_CREAT)) {
+		/* 
+		 * hj
+		 * maybe take this way
+		 */
+
 		if (nd->last.name[nd->last.len])
 			nd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
 		if (open_flag & O_PATH && !(nd->flags & LOOKUP_FOLLOW))
@@ -3234,7 +3340,23 @@ finish_open_created:
 		goto out;
 
 	BUG_ON(*opened & FILE_OPENED); /* once it's opened, it's opened */
+
+	// nysong -----------------------
+	getnstimeofday(&ts);
+	start_time = timespec_to_ns(&ts);
+	// ------------------------------
+	
 	error = vfs_open(&nd->path, file, current_cred());
+	
+	// nysong --------------------------
+	getnstimeofday(&ts);
+	end_time = timespec_to_ns(&ts);
+	if(insmod_nysong == 1 && p_latency_vfs_open != NULL) 
+	{
+		p_latency_vfs_open(name->name, end_time - start_time);
+	}
+	// --------------------------------
+
 	if (!error) {
 		*opened |= FILE_OPENED;
 	} else {
@@ -3350,8 +3472,11 @@ out:
 	return error;
 }
 
-struct file *(*p_openat_by_hj)() = NULL;
-EXPORT_SYMBOL(p_openat_by_hj);
+
+void (*p_latency_path_init)(const char *, unsigned long long) =  NULL;
+void (*p_latency_do_last)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_path_init);
+EXPORT_SYMBOL(p_latency_do_last);
 
 static struct file *path_openat(int dfd, struct filename *pathname,
 		struct nameidata *nd, const struct open_flags *op, int flags)
@@ -3368,112 +3493,84 @@ static struct file *path_openat(int dfd, struct filename *pathname,
 	int opened = 0;
 	int error;
 
-
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
 	file = get_empty_filp();
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	printk("[HJ] [%s] get_empty_filp() time [%llu]\n", pathname->name, end_time - start_time);
 	if (IS_ERR(file))
 		return file;
 
 	file->f_flags = op->open_flag;
 
 	if (unlikely(file->f_flags & __O_TMPFILE)) {
-		// hj - maybe try to open temp file
-		// not this path
-		printk("[HJ] unlikely(file->f_flags & __O_TMPFILE) \n");
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
 		error = do_tmpfile(dfd, pathname, nd, flags, op, file, &opened);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] do_tmpfile() time [%llu]\n", pathname->name, end_time - start_time);
 		goto out2;
 	}
 
-	if(strcmp() == 0) {
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
-		error = path_init(dfd, pathname, flags, nd);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] path_init() time [%llu]\n", pathname->name, end_time - start_time);
+	// nysong -----------------------
+	getnstimeofday(&ts);
+	start_time = timespec_to_ns(&ts);
+	// ------------------------------
+
+	error = path_init(dfd, pathname, flags, nd);
+	
+	// nysong ----------------------
+	getnstimeofday(&ts);
+	end_time = timespec_to_ns(&ts);
+
+	if(insmod_nysong == 1 && p_latency_path_init != NULL)
+	{
+		p_latency_path_init(pathname->name, end_time - start_time);
 	}
+	// --------------------------------
 
 	if (unlikely(error))
 		goto out;
 
+	// nysong --------------------------
 	getnstimeofday(&ts);
 	start_time = timespec_to_ns(&ts);
+	// ------------------------------------
+
 	error = do_last(nd, &path, file, op, &opened, pathname);
+	
+	// nysong -------------------------
 	getnstimeofday(&ts);
 	end_time = timespec_to_ns(&ts);
-	printk("[HJ] [%s] do_last() time [%llu]\n", pathname->name, end_time - start_time);
+	
+	if(insmod_nysong == 1 && p_latency_do_last != NULL)
+	{
+		p_latency_do_last(pathname->name, end_time - start_time);
+	}
+	// -----------------------------------
+
 	while (unlikely(error > 0)) { /* trailing symlink */
 		struct path link = path;
 		void *cookie;
 		// maybe there exists symbolic link to file
 		// error-- 시키면서 link 개수만큼 따라갈듯???
-		printk("[HJ] [%s] unlikely(error > 0) - means trailing symlink \n", pathname->name);
 		if (!(nd->flags & LOOKUP_FOLLOW)) {
-			printk("[HJ] [%s] (!(nd->flags & LOOKUP_FOLLOW)) \n", pathname->name);
-			getnstimeofday(&ts);
-			start_time = timespec_to_ns(&ts);
 			path_put_conditional(&path, nd);
-			getnstimeofday(&ts);
-			end_time = timespec_to_ns(&ts);
-			printk("[HJ] [%s] path_put_conditional() time [%llu]\n", pathname->name, end_time - start_time);
 
-			getnstimeofday(&ts);
-			start_time = timespec_to_ns(&ts);
 			path_put(&nd->path);
-			getnstimeofday(&ts);
-			end_time = timespec_to_ns(&ts);
-			printk("[HJ] [%s] path_put() time [%llu]\n", pathname->name, end_time - start_time);
 			error = -ELOOP;
 			break;
 		}
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
+
 		error = may_follow_link(&link, nd);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] may_follow_link time [%llu]\n",pathname->name, end_time - start_time);
+		
 		if (unlikely(error))
 			break;
 		nd->flags |= LOOKUP_PARENT;
 		nd->flags &= ~(LOOKUP_OPEN|LOOKUP_CREATE|LOOKUP_EXCL);
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
+		
 		error = follow_link(&link, nd, &cookie);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] follow_link() time [%llu]\n", pathname->name, end_time - start_time);
+		
 		if (unlikely(error))
 			break;
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
+		
 		error = do_last(nd, &path, file, op, &opened, pathname);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] do_last() time [%llu]\n", pathname->name, end_time - start_time);
-
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
 		put_link(nd, &link, cookie);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] put_link() time [%llu]\n", pathname->name, end_time - start_time);
 	}
 out:
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
 	path_cleanup(nd);
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	printk("[HJ] [%s] path_cleanup() time [%llu]\n", pathname->name, end_time - start_time);
 out2:
 	if (!(opened & FILE_OPENED)) {
 		BUG_ON(!error);
@@ -3491,6 +3588,10 @@ out2:
 	return file;
 }
 
+
+void (*p_latency_path_openat)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_path_openat);
+
 struct file *do_filp_open(int dfd, struct filename *pathname,
 		const struct open_flags *op)
 {
@@ -3499,34 +3600,34 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	 * time profiling
 	 */
 	unsigned long long start_time, end_time;
-	struct timespec ts;
+	struct timespec ts_start, ts_end;
+
 	struct nameidata nd;
 	int flags = op->lookup_flags;
 	struct file *filp;
 
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
+	// nysong -------------------
+	getnstimeofday(&ts_start);
+	// ----------------------------
+
 	filp = path_openat(dfd, pathname, &nd, op, flags | LOOKUP_RCU);
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	printk("[HJ] [%s] path_openat() time [%llu]\n", pathname->name, end_time - start_time);
+	
+	// nysong --------------------
+	getnstimeofday(&ts_end);
+	start_time = timespec_to_ns(&ts_start);
+	end_time = timespec_to_ns(&ts_end);
+
+	if(insmod_nysong == 1 && p_latency_path_openat != NULL)	// nysong 
+	{
+		(*p_latency_path_openat)(pathname->name, end_time - start_time);
+	}
+	// --------------------------------
+
 	if (unlikely(filp == ERR_PTR(-ECHILD))) {
-		printk("[HJ] [%s] unlikely(filp == ERR_PTR(-ECHILD)) \n", pathname->name);
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
 		filp = path_openat(dfd, pathname, &nd, op, flags);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] path_openat() time [%llu]\n", pathname->name, end_time - start_time);
 	}
 	if (unlikely(filp == ERR_PTR(-ESTALE))) {
-		printk("[HJ] [%s] unlikely(filp == ERR_PTR(-ESTALE)) \n", pathname->name);
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
 		filp = path_openat(dfd, pathname, &nd, op, flags | LOOKUP_REVAL);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] path_openat() time [%llu]\n", pathname->name, end_time - start_time);
 	}
 	return filp;
 }

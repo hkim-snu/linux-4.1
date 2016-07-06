@@ -40,6 +40,10 @@
 #include "acl.h"
 
 #include <trace/events/ext4.h>
+
+// hj
+#include <linux/time.h>
+
 /*
  * define how far ahead to read directories while searching them.
  */
@@ -1343,6 +1347,10 @@ static int is_dx_internal_node(struct inode *dir, ext4_lblk_t block,
 	return 0;
 }
 
+extern int insmod_nysong;
+void (*p_latency_search_dirblock)(const unsigned char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_search_dirblock);
+
 /*
  *	ext4_find_entry()
  *
@@ -1371,6 +1379,11 @@ static struct buffer_head * ext4_find_entry (struct inode *dir,
 	int num = 0;
 	ext4_lblk_t  nblocks;
 	int i, namelen;
+
+	// nysong ------
+	struct timespec ts;
+	unsigned long long start_time, end_time;
+	// -------------
 
 	*res_dir = NULL;
 	sb = dir->i_sb;
@@ -1421,6 +1434,12 @@ static struct buffer_head * ext4_find_entry (struct inode *dir,
 	block = start;
 restart:
 	do {
+		// nysong ---------------
+		if (insmod_nysong == 1)
+		{
+			printk("block = %d, start = %d\n", block, start);
+		}
+		// ----------------------
 		/*
 		 * We deal with the read-ahead logic here.
 		 */
@@ -1429,6 +1448,13 @@ restart:
 			ra_ptr = 0;
 			b = block;
 			for (ra_max = 0; ra_max < NAMEI_RA_SIZE; ra_max++) {
+				// nysong ----------------
+				if(insmod_nysong == 1)
+				{
+					printk("ra_max = %d\n", ra_max);
+
+				}
+				// ---------------------
 				/*
 				 * Terminate if we reach the end of the
 				 * directory and must wrap, or if our
@@ -1472,8 +1498,24 @@ restart:
 			goto next;
 		}
 		set_buffer_verified(bh);
+		// nysong -------------
+		getnstimeofday(&ts);
+		start_time = timespec_to_ns(&ts);
+		// -----------------------
+
 		i = search_dirblock(bh, dir, d_name,
 			    block << EXT4_BLOCK_SIZE_BITS(sb), res_dir);
+
+		// nysong --------------------
+		getnstimeofday(&ts);
+		end_time = timespec_to_ns(&ts);
+
+		if(insmod_nysong == 1 && p_latency_search_dirblock != NULL)
+		{
+			p_latency_search_dirblock(d_name->name, end_time - start_time);
+		}
+		// ---------------------------
+
 		if (i == 1) {
 			EXT4_I(dir)->i_dir_start_lookup = block;
 			ret = bh;
@@ -1559,16 +1601,51 @@ success:
 	return bh;
 }
 
+void (*p_latency_ext4_find_entry)(unsigned char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_ext4_find_entry);
+
+void (*p_latency_d_slice_alias)(unsigned char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_d_slice_alias);
+
+void (*p_latency_ext4_iget_normal)(unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_ext4_iget_normal);
+
 static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
 {
 	struct inode *inode;
 	struct ext4_dir_entry_2 *de;
 	struct buffer_head *bh;
+	// hj
+	struct dentry *resultDentry;
+	const char *_name = NULL;
+
+	// nysong --------
+	struct timespec ts;
+	unsigned long long start_time, end_time;
+	// --------------
 
 	if (dentry->d_name.len > EXT4_NAME_LEN)
 		return ERR_PTR(-ENAMETOOLONG);
 
+
+	// nysong ---------------
+	getnstimeofday(&ts);
+	start_time = timespec_to_ns(&ts);
+	// --------------------------
+
 	bh = ext4_find_entry(dir, &dentry->d_name, &de, NULL);
+	
+	// nysong -------------------
+	getnstimeofday(&ts);
+	end_time = timespec_to_ns(&ts);
+
+	if(insmod_nysong == 1 && p_latency_ext4_find_entry != NULL)
+	{
+		p_latency_ext4_find_entry(dentry->d_iname, end_time - start_time);
+
+	}
+	// ----------------------------
+
 	if (IS_ERR(bh))
 		return (struct dentry *) bh;
 	inode = NULL;
@@ -1584,7 +1661,48 @@ static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry, unsi
 					 dentry);
 			return ERR_PTR(-EIO);
 		}
+
+		_name = dentry->d_name.name;
+
+		// hj - time checking
+		getnstimeofday(&ts);
+		start_time = timespec_to_ns(&ts);
+		// ------------------------------------
+
 		inode = ext4_iget_normal(dir->i_sb, ino);
+		
+		// nysong -------------------
+		getnstimeofday(&ts);
+		end_time = timespec_to_ns(&ts);
+
+		if(insmod_nysong == 1 && p_latency_ext4_iget_normal != NULL)
+		{
+			p_latency_ext4_iget_normal(end_time - start_time);
+
+		}
+		// ----------------------------------
+
+		//printk("[HJ] [%s] ext4_iget_normal() time: [%llu]\n", _name, end_time - start_time);
+		/*
+		if (*_name) {
+			if (strncmp(_name, "mnt", strlen("mnt"))
+				|| strncmp(_name, "sdb", strlen("sdb"))
+				|| strncmp(_name, "a1", strlen("a1"))
+				|| strncmp(_name, "b2", strlen("b2"))
+				|| strncmp(_name, "c3", strlen("c3"))
+				|| strncmp(_name, "d4", strlen("d4"))
+				|| strncmp(_name, "e5", strlen("e5"))
+				|| strncmp(_name, "f6", strlen("f6"))
+				|| strncmp(_name, "g7", strlen("g7"))
+				|| strncmp(_name, "h8", strlen("h8"))
+				|| strncmp(_name, "i9", strlen("i9"))
+				|| strncmp(_name, "bigfile", strlen("bigfile"))
+			) {
+				printk("[HJ] [%s] ext4_iget_normal() time: [%llu]\n", _name, end_time - start_time);
+			}
+		}
+		*/
+
 		if (inode == ERR_PTR(-ESTALE)) {
 			EXT4_ERROR_INODE(dir,
 					 "deleted inode referenced: %u",
@@ -1604,7 +1722,47 @@ static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry, unsi
 			return ERR_PTR(-EPERM);
 		}
 	}
-	return d_splice_alias(inode, dentry);
+
+	// hj - modify for time checking
+	getnstimeofday(&ts);
+	start_time = timespec_to_ns(&ts);
+	// ----------------------------------
+	
+	resultDentry = d_splice_alias(inode, dentry);
+	
+	// --------------------------
+	getnstimeofday(&ts);
+	end_time = timespec_to_ns(&ts);
+	if(insmod_nysong == 1 && p_latency_d_slice_alias != NULL)
+	{
+		p_latency_d_slice_alias(dentry->d_iname, end_time - start_time);
+	}
+	// -------------------------------
+
+	//printk("[HJ] [%s] d_splice_alias() time: [%llu]\n", _name, end_time - start_time);
+	/*
+	if (*_name) {
+		if (strncmp(_name, "mnt", strlen("mnt"))
+			|| strncmp(_name, "sdb", strlen("sdb"))
+			|| strncmp(_name, "a1", strlen("a1"))
+			|| strncmp(_name, "b2", strlen("b2"))
+			|| strncmp(_name, "c3", strlen("c3"))
+			|| strncmp(_name, "d4", strlen("d4"))
+			|| strncmp(_name, "e5", strlen("e5"))
+			|| strncmp(_name, "f6", strlen("f6"))
+			|| strncmp(_name, "g7", strlen("g7"))
+			|| strncmp(_name, "h8", strlen("h8"))
+			|| strncmp(_name, "i9", strlen("i9"))
+			|| strncmp(_name, "bigfile", strlen("bigfile"))
+		) {
+			printk("[HJ] [%s] d_splice_alias() time: [%llu]\n", _name, end_time - start_time);
+		}
+	}
+	*/
+
+	return resultDentry;
+	// original source code
+	//return d_splice_alias(inode, dentry);
 }
 
 

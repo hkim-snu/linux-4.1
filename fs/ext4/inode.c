@@ -4058,6 +4058,13 @@ struct inode *ext4_iget(struct super_block *sb, unsigned long ino)
 	ei = EXT4_I(inode);
 	iloc.bh = NULL;
 
+	/* 
+	 * hj
+	 * inode offset 계산해서, 원하는 block 이 메모리에 있으면 해당 block 읽음
+	 * 없으면 readahead_blks 만큼 같이 inodeTable 을 디스크로부터 읽어옴!!
+	 * 이 함수가 처음에 오래걸리는 놈임!!! -> inodeTable 이 없으면 읽어오니까.
+	 * depth 3 -> 390.372 us, 3.691 us, 3.655 us, 3.616 us
+	 */
 	ret = __ext4_get_inode_loc(inode, &iloc, 0);
 	if (ret < 0)
 		goto bad_inode;

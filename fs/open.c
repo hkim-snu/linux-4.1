@@ -1000,79 +1000,79 @@ struct file *file_open_root(struct dentry *dentry, struct vfsmount *mnt,
 }
 EXPORT_SYMBOL(file_open_root);
 
+int insmod_nysong = 0;
+EXPORT_SYMBOL(insmod_nysong);
+
+void (*p_latency_do_sys_open)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_do_sys_open);
+void (*p_latency_do_filp_open)(const char *, unsigned long long) = NULL;
+EXPORT_SYMBOL(p_latency_do_filp_open);
+
 long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 {
-	// hj - to check time at each function
 	unsigned long long start_time, end_time;
-	struct timespec ts;
+	struct timespec ts_s, ts_e;;
+	struct timespec ts_start, ts_end;
+
 	struct open_flags op;
-	//printk("[HJ] do_sys_open()\n");
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
 	int fd = build_open_flags(flags, mode, &op);
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	printk("[HJ] build_open_flags() time [%llu]\n", end_time - start_time);
 	struct filename *tmp;
+
+	// nysong -----------
+	getnstimeofday(&ts_s);
+	// ------------------
+	
 
 	if (fd)
 		return fd;
 	
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
 	tmp = getname(filename);
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	printk("[HJ] [%s] getname() time() [%llu]\n", tmp->name, end_time - start_time);
+	
 	if (IS_ERR(tmp))
 		return PTR_ERR(tmp);
 
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
 	fd = get_unused_fd_flags(flags);
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	printk("[HJ] [%s] get_unused_fd_flags() time [%llu]\n", tmp->name, end_time - start_time);
+	
 	if (fd >= 0) {
-		getnstimeofday(&ts);
-		start_time = timespec_to_ns(&ts);
+		// nysong -------------------
+		getnstimeofday(&ts_start);
+
 		struct file *f = do_filp_open(dfd, tmp, &op);
-		getnstimeofday(&ts);
-		end_time = timespec_to_ns(&ts);
-		printk("[HJ] [%s] do_filp_open() time [%llu]\n", tmp->name, end_time - start_time);
+		
+		getnstimeofday(&ts_end);
+		start_time = timespec_to_ns(&ts_start);
+		end_time = timespec_to_ns(&ts_end);
+
+		if(insmod_nysong == 1 && p_latency_do_filp_open != NULL) // nysong
+		{
+			(*p_latency_do_filp_open)(filename, end_time - start_time);
+		}
+		// ----------------------------------
+
 		if (IS_ERR(f)) {
-			printk("[HJ] IS_ERR(f) case\n");
-			getnstimeofday(&ts);
-			start_time = timespec_to_ns(&ts);
 			put_unused_fd(fd);
-			getnstimeofday(&ts);
-			end_time = timespec_to_ns(&ts);
-			printk("[HJ] [%s] put_unused_fd() time [%llu]\n", tmp->name, end_time - start_time);
 			fd = PTR_ERR(f);
 		} else { 	// hj - else routine if file open successfully!
-			printk("[HJ] [%s] do_filp_open success!\n", tmp->name);
-			getnstimeofday(&ts);
-			start_time = timespec_to_ns(&ts);
-			fsnotify_open(f);
-			getnstimeofday(&ts);
-			end_time = timespec_to_ns(&ts);
-			printk("[HJ] [%s] fsnotify_open() time [%llu]\n", tmp->name, end_time - start_time);
 
-			getnstimeofday(&ts);
-			start_time = timespec_to_ns(&ts);
+			fsnotify_open(f);
+
 			fd_install(fd, f);
-			getnstimeofday(&ts);
-			end_time = timespec_to_ns(&ts);
-			printk("[HJ] [%s] fd_install() time [%llu]\n", tmp->name, end_time - start_time);
 		}
 	}
-	printk("[HJ] [%s] putname() ", tmp->name);
-	getnstimeofday(&ts);
-	start_time = timespec_to_ns(&ts);
 	putname(tmp);	
-	getnstimeofday(&ts);
-	end_time = timespec_to_ns(&ts);
-	printk("time [%llu]\n", end_time - start_time);
+
+	// nysong -----
+	getnstimeofday(&ts_e);
+
+	start_time = timespec_to_ns(&ts_s);
+	end_time = timespec_to_ns(&ts_e);
+
+	if(insmod_nysong == 1 && p_latency_do_sys_open != NULL)
+	{
+		(*p_latency_do_sys_open)(filename, end_time - start_time);
+	}
+	// ---------------------------
+
 	return fd;
 }
 
@@ -1099,7 +1099,7 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 	result = do_sys_open(AT_FDCWD, filename, flags, mode);
 	getnstimeofday(&ts);
 	end_time = timespec_to_ns(&ts);
-	printk("[HJ] do_sys_open() time [%llu] \n", end_time - start_time);
+	//printk("[HJ] do_sys_open() time [%llu] \n", end_time - start_time);
 	return result;
 //	return do_sys_open(AT_FDCWD, filename, flags, mode);
 }
